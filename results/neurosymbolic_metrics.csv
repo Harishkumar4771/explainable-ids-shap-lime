@@ -1,0 +1,5 @@
+experiment,source,target,model,roc_auc,precision,recall,f1_score,fpr
+A,cicids,cicids,neuro_symbolic_surrogate,0.9932,0.2706,0.995,0.4254,0.0442
+B,unsw,unsw,neuro_symbolic_surrogate,0.7904,0.6076,0.8763,0.7176,0.3536
+C,cicids,unsw,neuro_symbolic_surrogate,0.4588,0.5882,0.0017,0.0034,0.0007
+D,unsw,cicids,neuro_symbolic_surrogate,0.0914,0.0016,0.0875,0.0031,0.9042
