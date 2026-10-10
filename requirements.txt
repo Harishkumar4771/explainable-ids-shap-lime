@@ -8,3 +8,8 @@ matplotlib==3.11.2
 seaborn==0.13.2
 jupyter==1.1.1
 imbalanced-learn==0.14.2
+joblib
+scipy
+pyyaml
+tqdm
+pytest

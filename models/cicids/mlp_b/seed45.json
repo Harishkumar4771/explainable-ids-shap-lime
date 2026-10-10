@@ -1,0 +1,22 @@
+{
+  "dataset": "cicids",
+  "model": "mlp_b",
+  "seed": 45,
+  "scaling_mode": "per_domain",
+  "features": [
+    "flow_duration",
+    "fwd_packets",
+    "bwd_packets",
+    "fwd_bytes",
+    "bwd_bytes",
+    "fwd_to_bwd_pkt_ratio",
+    "fwd_to_bwd_byte_ratio",
+    "bytes_per_packet",
+    "packets_per_second"
+  ],
+  "val_threshold": 0.9,
+  "val_roc_auc": 0.9909910351266347,
+  "epochs_run": 50,
+  "wall_clock_seconds": 48.6733284999973,
+  "git_commit": "e4510954acb33cc425e26c968ca5dc15e4ea9eb6"
+}

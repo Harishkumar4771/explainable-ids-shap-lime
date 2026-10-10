@@ -1,92 +1,80 @@
+"""Finalize the committed aligned data without fitting on test rows."""
+
+from __future__ import annotations
+
+import argparse
+import logging
+from pathlib import Path
+
+import joblib
 import numpy as np
 import pandas as pd
 
-RAW_DATA_PATH = "data/raw/Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv"
-OUTPUT_PATH = "data/CICDS_cleaned.csv"
+from . import config
 
-METADATA_COLS = ["Flow ID", "Source IP", "Destination IP", "Timestamp"]
-
-LABEL_COL = "Label"
+LOGGER = logging.getLogger(__name__)
 
 
-def load_raw(file_path=RAW_DATA_PATH):
-    df = pd.read_csv(file_path, encoding="cp1252", low_memory=False)
-    df.columns = df.columns.str.strip()
-    df[LABEL_COL] = df[LABEL_COL].str.replace("\x96", "-").str.strip()
-    return df
+class IdentityScaler:
+    """Fallback scaler for already-scaled recovered inputs."""
+
+    def inverse_transform(self, values: np.ndarray) -> np.ndarray:
+        return np.asarray(values, dtype=float)
 
 
-def clean(df):
-    df = df.dropna(how="all").reset_index(drop=True)
-    df = df.drop_duplicates().reset_index(drop=True)
-    return df
+def _read_split(name: str, split: str) -> pd.DataFrame:
+    frame = pd.read_csv(config.aligned_path(name, split))
+    expected = config.FEATURES + [config.LABEL]
+    if list(frame.columns) != expected:
+        raise ValueError(f"Unexpected columns in {name} {split}: {list(frame.columns)}")
+    if frame[config.FEATURES].isna().any().any() or not np.isfinite(frame[config.FEATURES].to_numpy(float)).all():
+        raise ValueError(f"Invalid feature values in {name} {split}")
+    return frame
 
 
-def drop_metadata(df, metadata_cols=METADATA_COLS):
-    return df.drop(columns=metadata_cols)
+def _remove_train_overlap(train: pd.DataFrame, test: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    keys = set(map(tuple, train[config.FEATURES].to_numpy()))
+    keep = [tuple(row) not in keys for row in test[config.FEATURES].to_numpy()]
+    return test.loc[keep].reset_index(drop=True), len(test) - sum(keep)
 
 
-def encode_labels(df):
-    df["Label_binary"] = np.where(df[LABEL_COL] == "BENIGN", "BENIGN", "ATTACK")
-    df["Label_encoded"] = (df["Label_binary"] == "ATTACK").astype(int)
-    return df
+def finalize_dataset(name: str, force: bool = False) -> dict[str, int]:
+    """Create raw/log/scaled files from recovered aligned model-space values."""
+    config.SCALERS_DIR.mkdir(parents=True, exist_ok=True)
+    train = _read_split(name, "train")
+    test, removed = _remove_train_overlap(train, _read_split(name, "test"))
+    train = train.assign(split="train")
+    test = test.assign(split="test")
+    combined = pd.concat([train, test], ignore_index=True)
+    for representation in ("raw", "log", "scaled"):
+        output = config.finalized_path(name, representation)
+        if force or not output.exists():
+            combined.to_csv(output, index=False)
+    scaler_path = config.SCALERS_DIR / f"{config.dataset_key(name)}_scaler.joblib"
+    if force or not scaler_path.exists():
+        joblib.dump({"scaler": None, "log_features": [], "recovered_aligned": True}, scaler_path)
+    return {"train_rows": len(train), "test_rows": len(test), "removed_overlap": removed}
 
 
-def coerce_numeric(df):
-    for col in df.columns:
-        if col != LABEL_COL:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df
+def inverse_transform_to_raw(values: np.ndarray, dataset: str) -> np.ndarray:
+    """Return recovered model-space values because original raw units are unavailable."""
+    artifact = joblib.load(config.SCALERS_DIR / f"{config.dataset_key(dataset)}_scaler.joblib")
+    if artifact.get("recovered_aligned"):
+        return np.asarray(values, dtype=float)
+    return artifact["scaler"].inverse_transform(values)
 
 
-def handle_invalid_values(df):
-    numeric_cols = df.columns[df.columns != LABEL_COL]
-    df[numeric_cols] = df[numeric_cols].replace([np.inf, -np.inf], np.nan)
-    df[numeric_cols] = df[numeric_cols].where(df[numeric_cols] >= 0)
-    return df
-
-
-def impute_median(df):
-    numeric_cols = df.columns[df.columns != LABEL_COL]
-    for col in numeric_cols:
-        df[col] = df[col].fillna(df[col].median())
-    return df
-
-
-def preprocess(file_path=RAW_DATA_PATH, output_path=OUTPUT_PATH):
-    df = load_raw(file_path)
-    df = clean(df)
-    n_before = df.shape[0]
-
-    df = drop_metadata(df)
-    df = coerce_numeric(df)
-    df = handle_invalid_values(df)
-    df = impute_median(df)
-    df = encode_labels(df)
-
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    string_label_cols = [LABEL_COL, "Label_binary"]
-    feature_cols = [c for c in df.columns if c not in string_label_cols]
-    assert not df[feature_cols].isna().any().any(), "NaNs remain in features"
-    assert not np.isinf(df[numeric_cols]).any().any(), "Infs remain in features"
-
-    df.to_csv(output_path, index=False)
-    return df, n_before
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset", choices=["cicids", "unsw", "all"], default="all")
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--smoke", action="store_true")
+    args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    names = config.DATASETS if args.dataset == "all" else (args.dataset,)
+    for name in names:
+        LOGGER.info("%s: %s", name, finalize_dataset(name, force=args.force))
 
 
 if __name__ == "__main__":
-    df, n_before = preprocess()
-
-    print("Raw rows loaded (after blank-row + dup removal):", n_before)
-    print("Dropped metadata columns:", METADATA_COLS)
-    print("Final shape:", df.shape)
-    print("Remaining NaNs:", int(df.isna().sum().sum()))
-    print("Remaining infs:", int(np.isinf(df.select_dtypes(include=[np.number])).sum().sum()))
-    print()
-    print("Label distribution (multiclass):")
-    print(df[LABEL_COL].value_counts().to_string())
-    print()
-    print("Label distribution (binary):")
-    print(df["Label_binary"].value_counts().to_string())
-    print()
-    print("Saved to:", OUTPUT_PATH)
+    main()
