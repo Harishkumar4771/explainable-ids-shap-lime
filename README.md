@@ -5,7 +5,7 @@ intrusion-detection models (benign vs attack) on nine flow features shared by CI
 in-domain and cross-dataset, and measures how much SHAP, LIME and a neuro-symbolic rule surrogate (IF-THEN rules
 extracted from the neural network) agree with each other and how stable they stay under dataset shift. A Streamlit dashboard shows all results and gives live predictions with explanations.
 
-Deep Learning CA3 project, Department of AI & ML, Symbiosis Institute of Technology, Pune.
+
 
 ## Quick start (use the committed models)
 
